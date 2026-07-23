@@ -16,8 +16,9 @@ links to them (with a ``#sha256=`` fragment when the digest is known).
 
 Wheel-to-backend mapping follows PyTorch's convention: the compute backend is
 encoded in the wheel's **local version label**, e.g.
-``fastfields_torch-0.1.0+cu124-cp311-cp311-linux_x86_64.whl``. A wheel with no
-local label is bucketed as ``cpu``.
+``fastfields_dlpack-0.1.0+cu128-cp311-cp311-linux_x86_64.whl``. A wheel with no
+local label is *universal* (pure Python, e.g. the numpy/torch wrappers) and is
+listed in every backend folder so each folder resolves on its own.
 
 Two discovery modes:
 
@@ -81,6 +82,10 @@ class Wheel:
     backend : str
         Compute backend bucket (``cpu``, ``cu124``, ...), taken from the
         wheel's local version label.
+    universal : bool
+        ``True`` for a pure-Python wheel (no local version label, e.g. the
+        ``fastfields-numpy``/``-torch`` wrappers). Universal wheels are listed
+        in *every* backend folder so each folder is self-contained.
     sha256 : str or None
         Hex digest, when known, appended to the link as ``#sha256=``.
     """
@@ -89,6 +94,7 @@ class Wheel:
     filename: str
     url: str
     backend: str
+    universal: bool = False
     sha256: str | None = None
 
 
@@ -112,12 +118,13 @@ def wheel_from_asset(filename: str, url: str, sha256: str | None) -> Wheel | Non
     m = WHEEL_RE.match(filename)
     if not m:
         return None
-    backend = m.group("local") or "cpu"
+    local = m.group("local")
     return Wheel(
         project=normalize(m.group("dist")),
         filename=filename,
         url=url,
-        backend=backend,
+        backend=local or "cpu",
+        universal=local is None,
         sha256=sha256,
     )
 
@@ -242,12 +249,24 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
     base_url = index_cfg.get("base_url", "https://fastfields.github.io/whl").rstrip("/")
     title = index_cfg.get("title", "fastfields wheel index")
 
-    # group: backend -> project -> [wheels]
-    tree: dict[str, dict[str, list[Wheel]]] = {}
-    for w in wheels:
-        tree.setdefault(w.backend, {}).setdefault(w.project, []).append(w)
+    universal = [w for w in wheels if w.universal]
+    labelled = [w for w in wheels if not w.universal]
 
-    backends = sorted(tree) or list(index_cfg.get("backends", []))
+    # Every folder we must emit: the config-declared backends, plus any seen on
+    # a labelled wheel, plus "cpu" (always present as the universal home).
+    backends = sorted(
+        {"cpu"} | set(index_cfg.get("backends", [])) | {w.backend for w in labelled}
+    )
+
+    # backend -> project -> [wheels]. A universal (pure-Python) wheel goes into
+    # EVERY backend folder so each folder resolves on its own; a labelled wheel
+    # only into its own backend.
+    tree: dict[str, dict[str, list[Wheel]]] = {b: {} for b in backends}
+    for w in labelled:
+        tree.setdefault(w.backend, {}).setdefault(w.project, []).append(w)
+    for b in backends:
+        for w in universal:
+            tree[b].setdefault(w.project, []).append(w)
 
     # Per-backend PEP 503 pages.
     for backend in sorted(tree):

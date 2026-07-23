@@ -29,15 +29,31 @@ Mirrors PyTorch's split between PyPI and the custom index:
 
 | channel | Linux / Windows | macOS |
 |---|---|---|
-| **PyPI** (`pip install fastfields-torch`) | the default **CUDA** wheel (`cu124`) | **CPU** wheel (no CUDA on macOS) |
-| **this index** (`--extra-index-url .../<backend>/`) | `cpu`, `cu118`, `cu124`, … | `cpu` |
+| **PyPI** (`pip install fastfields-dlpack`) | the default **CUDA** wheel (`cu128`) | **CPU** wheel (no CUDA on macOS) |
+| **this index** (`--extra-index-url .../<backend>/`) | `cpu`, `cu118`, `cu126`, `cu128` | `cpu` |
+
+Only `fastfields-dlpack` (which bundles the compiled `libfastfields*`) is built
+per-backend; the pure-Python wrappers (`fastfields-numpy`/`-torch`/`-cupy`,
+`fastfields`) are universal wheels and appear in every folder.
 
 **CUDA build target.** The wheels are compiled *fat*: one binary targets many
 GPU architectures (SASS for several `sm_*` plus a forward-compatible PTX), so a
 single wheel runs on as many GPUs as possible at the cost of size and build
-time. The PyPI default (`cu124`) covers Maxwell→Hopper (`sm_50`…`sm_90`); the
-`cu118` line on the index reaches older Kepler/Pascal drivers. See the package
-build workflows for the exact `-gencode` list.
+time. The PyPI default is the **newest broadly-supported** toolkit so it also
+covers the latest architectures: **`cu128`** spans Maxwell→Blackwell
+(`sm_50`…`sm_120`, driver ≥ 570). The `cu118` line on the index keeps the long
+tail alive (Kepler…Ampere on older drivers ≥ 450); `cu126` sits in between. See
+the package build workflow for the exact `-gencode` list.
+
+### Mixing CUDA versions with PyTorch / CuPy
+
+You can install a fastfields build compiled against a **different** CUDA version
+than your PyTorch/CuPy — they load their own CUDA runtimes side by side and
+interoperate through DLPack device pointers, which are runtime-version-agnostic.
+The only hard requirement is that your **GPU driver** satisfies the *newest*
+toolkit among them (so a `cu128` fastfields needs a driver new enough for CUDA
+12.8, even if torch is `cu126`). If you'd rather not raise your driver floor,
+pick the index folder matching your torch build (`.../cu126/`).
 
 ## How it is built
 
