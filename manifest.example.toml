@@ -1,0 +1,19 @@
+# Example offline manifest for local testing:
+#   python generate.py --manifest manifest.example.toml --out public
+# In CI the wheels are discovered from GitHub Releases instead
+# (python generate.py --from-releases). The backend bucket is read from each
+# wheel's local version label (the "+cu124" / "+cpu" part of the filename).
+
+[[wheel]]
+filename = "fastfields_torch-0.1.0+cpu-cp311-cp311-linux_x86_64.whl"
+url = "https://github.com/fastfields/fastfields-torch/releases/download/v0.1.0/fastfields_torch-0.1.0+cpu-cp311-cp311-linux_x86_64.whl"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[wheel]]
+filename = "fastfields_torch-0.1.0+cu124-cp311-cp311-linux_x86_64.whl"
+url = "https://github.com/fastfields/fastfields-torch/releases/download/v0.1.0/fastfields_torch-0.1.0+cu124-cp311-cp311-linux_x86_64.whl"
+sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+
+[[wheel]]
+filename = "fastfields_numpy-0.1.0-py3-none-any.whl"
+url = "https://github.com/fastfields/fastfields-numpy/releases/download/v0.1.0/fastfields_numpy-0.1.0-py3-none-any.whl"

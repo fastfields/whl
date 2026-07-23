@@ -1,0 +1,50 @@
+name: Build and deploy wheel index
+
+on:
+  # Rebuild when the generator or config changes.
+  push:
+    branches: [main]
+    paths:
+      - generate.py
+      - sources.toml
+      - .github/workflows/build-index.yaml
+  # Rebuild on demand, and when a package repo publishes a release and pings us
+  # (repository_dispatch event type "wheels-updated").
+  workflow_dispatch:
+  repository_dispatch:
+    types: [wheels-updated]
+  # Safety net: pick up newly-published release assets once a day.
+  schedule:
+    - cron: "17 4 * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # generate.py uses tomllib (>=3.11)
+      - name: Generate PEP 503 index from GitHub Releases
+        env:
+          # Lets the API discovery read release assets (and raises rate limits).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python generate.py --from-releases --out public
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+      - uses: actions/deploy-pages@v4
+        id: deployment

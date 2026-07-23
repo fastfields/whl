@@ -1,0 +1,35 @@
+# Configuration for the fastfields wheel index (generate.py).
+
+[index]
+title = "fastfields wheel index"
+base_url = "https://fastfields.github.io/whl"
+org = "fastfields"
+
+# Compute-backend buckets the index advertises on its landing page, even before
+# wheels exist for them. The bucket name is the wheel's local version label
+# (PyTorch convention): "cpu", "cu118", "cu124", ...
+#
+# Policy (see README): PyPI ships the broad default (cu124 on Linux/Windows,
+# cpu on macOS); this index additionally offers cpu + older/newer CUDA lines.
+backends = ["cpu", "cu118", "cu124"]
+
+# PyPI-normalized project names served by the index.
+projects = [
+    "fastfields-dlpack",
+    "fastfields-numpy",
+    "fastfields-cupy",
+    "fastfields-torch",
+    "fastfields",
+]
+
+# GitHub repos whose Releases hold the wheel assets (used by --from-releases).
+[[sources.release]]
+repo = "fastfields/fastfields-bind-py"
+[[sources.release]]
+repo = "fastfields/fastfields-numpy"
+[[sources.release]]
+repo = "fastfields/fastfields-cupy"
+[[sources.release]]
+repo = "fastfields/fastfields-torch"
+[[sources.release]]
+repo = "fastfields/fastfields"
