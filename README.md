@@ -4,10 +4,18 @@ A PyTorch-style [PEP 503][pep503] "simple repository" for the fastfields Python
 packages, published to GitHub Pages at **<https://fastfields.github.io/whl/>**.
 
 Like PyTorch's `download.pytorch.org/whl`, it has **one folder per compute
-backend** — `cpu/`, `cu118/`, `cu124/`, … — so you can install a build that
-matches your hardware. The compute backend is encoded in each wheel's **local
-version label** (e.g. `fastfields_torch-0.1.0+cu124-…whl`), exactly as PyTorch
-does.
+backend** — `cpu/`, `cu118/`, `cu126/`, `cu128/`, … — so you can install a
+build that matches your hardware. The compute backend is encoded in each
+wheel's **local version label** (e.g. `fastfields_torch-0.1.0+cu128-…whl`),
+exactly as PyTorch does.
+
+> **Status:** only the **`cpu`** lane is published today. The CUDA lanes
+> (`cu118`, `cu126`, `cu128`) are **planned but not yet published** — the
+> per-backend folders exist, but no CUDA wheel has been built yet, so passing
+> a `.../cu128/` folder as an `--extra-index-url` currently resolves to
+> nothing. The generated landing page lists such backends under *"planned — not
+> yet published"* and only shows a `pip install` command once at least one
+> wheel is discovered for that backend.
 
 ## Installing
 
@@ -16,12 +24,12 @@ The index only serves the `fastfields-*` packages; ordinary dependencies
 **`--extra-index-url`**:
 
 ```sh
-# CUDA 12.4 build
-pip install fastfields-torch --extra-index-url https://fastfields.github.io/whl/cu124/
-
-# CPU-only build
+# CPU-only build (the only lane published today)
 pip install fastfields-numpy --extra-index-url https://fastfields.github.io/whl/cpu/
 ```
+
+The CUDA lanes above are not installable from this index yet; see the status
+note. The PyPI default build is unaffected (see *Distribution policy*).
 
 ## Distribution policy
 
@@ -60,7 +68,13 @@ pick the index folder matching your torch build (`.../cu126/`).
 - `generate.py` — stdlib-only generator that emits the PEP 503 HTML tree into
   `public/`. It buckets wheels by their local version label and links to the
   wheel files (hosted as **GitHub Release assets** on each package repo, not
-  committed here). Digests are added as `#sha256=` when known.
+  committed here). Digests are added as `#sha256=`. For the `--manifest` path a
+  `sha256` is **required** on every `[[wheel]]` entry (we control that file, so
+  the generator errors out on a missing digest). The `--from-releases` path
+  reads the digest from a sibling `<wheel>.sha256` release asset when present
+  and emits a `::warning::` for any wheel lacking one, since the GitHub
+  Releases API exposes no per-asset digest — package release workflows should
+  upload a matching `.sha256` next to each wheel.
 - `sources.toml` — the advertised backends, the served projects, and the source
   repos whose Releases hold the wheels.
 - `.github/workflows/build-index.yaml` — regenerates from the GitHub Releases
