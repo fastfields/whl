@@ -3,16 +3,27 @@
 
 The index is a set of static HTML pages laid out as a *simple repository*
 (:pep:`503`), one **backend** subfolder per compute target
-(``cpu/``, ``cu118/``, ``cu124/`` ...). It is published to GitHub Pages at
-``https://fastfields.github.io/whl/`` so users can install a build matching
-their hardware::
+(``cpu/``, ``cu118/``, ``cu126/``, ``cu128/`` ...). It is published to GitHub
+Pages at ``https://fastfields.github.io/whl/`` so users can install a build
+matching their hardware::
 
     pip install fastfields-torch \\
-        --extra-index-url https://fastfields.github.io/whl/cu124/
+        --extra-index-url https://fastfields.github.io/whl/cpu/
 
 The wheels themselves are **not** committed here -- they are hosted as GitHub
 *Release* assets on each package repo. This script only emits the HTML that
 links to them (with a ``#sha256=`` fragment when the digest is known).
+
+The landing page splits the backends into those with at least one discovered
+wheel (rendered as ready-to-use ``pip install`` commands) and those that are
+merely *declared* in ``sources.toml`` but have no wheels yet (listed as
+"planned -- not yet published"), so an advertised folder never implies an
+install that silently resolves to nothing.
+
+Digests: for the ``--manifest`` path a ``sha256`` is **required** on every
+``[[wheel]]`` entry (we control that file). The ``--from-releases`` path takes
+the digest from a sibling ``<wheel>.sha256`` release asset when present and
+warns otherwise, since the GitHub Releases API exposes no per-asset digest.
 
 Wheel-to-backend mapping follows PyTorch's convention: the compute backend is
 encoded in the wheel's **local version label**, e.g.
@@ -80,7 +91,7 @@ class Wheel:
     url : str
         Absolute download URL (a GitHub Release asset URL).
     backend : str
-        Compute backend bucket (``cpu``, ``cu124``, ...), taken from the
+        Compute backend bucket (``cpu``, ``cu128``, ...), taken from the
         wheel's local version label.
     universal : bool
         ``True`` for a pure-Python wheel (no local version label, e.g. the
@@ -150,7 +161,8 @@ def wheels_from_manifest(path: Path) -> list[Wheel]:
     """Read wheel entries from a TOML manifest (offline discovery).
 
     The manifest holds an array of ``[[wheel]]`` tables, each with ``filename``,
-    ``url`` and an optional ``sha256``.
+    ``url`` and a **required** ``sha256`` (the manifest is a file we control,
+    so the digest is mandatory rather than best-effort).
 
     Parameters
     ----------
@@ -161,12 +173,24 @@ def wheels_from_manifest(path: Path) -> list[Wheel]:
     -------
     list of Wheel
         Every parsable wheel entry.
+
+    Raises
+    ------
+    ValueError
+        If any ``[[wheel]]`` entry lacks a ``sha256`` digest.
     """
     with path.open("rb") as fh:
         data = tomllib.load(fh)
     out: list[Wheel] = []
     for entry in data.get("wheel", []):
-        wheel = wheel_from_asset(entry["filename"], entry["url"], entry.get("sha256"))
+        sha256 = entry.get("sha256")
+        if not sha256:
+            name = entry.get("filename", "<unnamed>")
+            raise ValueError(
+                f"manifest wheel {name!r} is missing a required 'sha256' "
+                "digest; every [[wheel]] entry must declare one"
+            )
+        wheel = wheel_from_asset(entry["filename"], entry["url"], sha256)
         if wheel is not None:
             out.append(wheel)
     return out
@@ -184,8 +208,33 @@ def _gh_get(url: str) -> list | dict:
         return json.load(resp)
 
 
+def _read_sha256_asset(url: str) -> str | None:
+    """Fetch a ``.sha256`` sidecar asset, returning its hex digest or ``None``.
+
+    The asset content is expected to be ``<hexdigest>`` optionally followed by
+    whitespace and the file name (the usual ``sha256sum`` format).
+    """
+    req = urllib.request.Request(url)
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req) as resp:  # noqa: S310 (trusted host)
+            text = resp.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        print(f"::warning::failed to read {url}: {exc}", file=sys.stderr)
+        return None
+    parts = text.split()
+    return parts[0] if parts else None
+
+
 def wheels_from_releases(repos: Iterable[str]) -> list[Wheel]:
     """Discover wheels from the GitHub Releases of each source repo.
+
+    The GitHub Releases API exposes no per-asset digest, so each wheel's
+    ``sha256`` is taken from a sibling ``<wheel>.sha256`` release asset if the
+    package repo ships one. A wheel with no such sidecar is still indexed but
+    triggers a ``::warning::`` (its link carries no ``#sha256=`` fragment).
 
     Parameters
     ----------
@@ -208,9 +257,28 @@ def wheels_from_releases(repos: Iterable[str]) -> list[Wheel]:
             print(f"::warning::skipping {repo}: {exc}", file=sys.stderr)
             continue
         for rel in releases:
-            for asset in rel.get("assets", []):
+            assets = rel.get("assets", [])
+            sidecars = {
+                a["name"]: a["browser_download_url"]
+                for a in assets
+                if a["name"].endswith(".sha256")
+            }
+            for asset in assets:
+                name = asset["name"]
+                if not name.endswith(".whl"):
+                    continue
+                sha256 = None
+                sidecar_url = sidecars.get(f"{name}.sha256")
+                if sidecar_url is not None:
+                    sha256 = _read_sha256_asset(sidecar_url)
+                if not sha256:
+                    print(
+                        f"::warning::no sha256 for {name}; publish a matching "
+                        f"{name}.sha256 asset alongside the wheel",
+                        file=sys.stderr,
+                    )
                 wheel = wheel_from_asset(
-                    asset["name"], asset["browser_download_url"], None
+                    name, asset["browser_download_url"], sha256
                 )
                 if wheel is not None:
                     out.append(wheel)
@@ -295,23 +363,52 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
                 files,
             )
 
-    # Human-facing landing page.
-    rows = "\n".join(
+    # Human-facing landing page. Only advertise a copy-paste ``pip install``
+    # for backends that actually have a discovered wheel; backends that are
+    # merely declared in sources.toml (no wheels yet) are listed as "planned"
+    # so an advertised folder never implies an install that resolves to
+    # nothing. A universal (pure-Python) wheel counts under "cpu" (its bucket),
+    # not as coverage for every CUDA lane it is mirrored into.
+    have_wheel = {w.backend for w in wheels}
+    available = [b for b in backends if b in have_wheel]
+    planned = [b for b in backends if b not in have_wheel]
+
+    avail_rows = "\n".join(
         "<li><code>{b}</code> &mdash; "
         "<code>pip install fastfields-torch --extra-index-url "
-        "{base}/{b}/</code></li>".format(b=html.escape(b), base=html.escape(base_url))
-        for b in backends
+        "{base}/{b}/</code></li>".format(
+            b=html.escape(b), base=html.escape(base_url)
+        )
+        for b in available
     )
-    body = (
-        f"<h1>{html.escape(title)}</h1>"
+    planned_rows = "\n".join(
+        f"<li><code>{html.escape(b)}</code></li>" for b in planned
+    )
+
+    parts = [
+        f"<h1>{html.escape(title)}</h1>",
         "<p>PyTorch-style wheel index for the fastfields Python packages. "
         "Pick the folder matching your compute backend and pass it as an "
         "<code>--extra-index-url</code> (dependencies still resolve from "
-        "PyPI):</p>"
-        f"<ul>{rows}</ul>"
+        "PyPI):</p>",
+    ]
+    if available:
+        parts.append("<h2>Available</h2>")
+        parts.append(f"<ul>{avail_rows}</ul>")
+    if planned:
+        parts.append("<h2>Planned &mdash; not yet published</h2>")
+        parts.append(
+            "<p>These backends are declared but have no wheels published "
+            "yet, so installing from their folder resolves to nothing "
+            "today. Do not pass them as an <code>--extra-index-url</code> "
+            "until a build lands here.</p>"
+        )
+        parts.append(f"<ul>{planned_rows}</ul>")
+    parts.append(
         '<p>See <a href="https://github.com/fastfields/whl">the repository</a> '
         "for how the index is built.</p>"
     )
+    body = "".join(parts)
     write_page(out_dir / "index.html", title, body)
     print(
         f"wrote {sum(len(p) for b in tree.values() for p in b.values())} "
