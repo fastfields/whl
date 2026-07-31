@@ -7,12 +7,19 @@ org = "fastfields"
 
 # Compute-backend buckets the index advertises on its landing page, even before
 # wheels exist for them. The bucket name is the wheel's local version label
-# (PyTorch convention): "cpu", "cu118", "cu126", "cu128", ...
+# (PyTorch convention): "cpu", "cu118", "cu126", "cu130", ...
 #
-# Policy (see README): PyPI ships the broad default (cu128 on Linux/Windows,
-# cpu on macOS); this index additionally offers cpu + other CUDA lines so users
-# can match the CUDA version of their PyTorch/CuPy install if they wish.
-backends = ["cpu", "cu118", "cu126", "cu128"]
+# One CUDA lane per CUDA major, since the nvcc version sets which GPU
+# architectures a wheel can reach: cu118 (Kepler/Maxwell -> Ada, driver ~450+),
+# cu126 (Volta -> Hopper/Ada, driver ~525+), cu130 (Turing -> Blackwell,
+# sm_75+, driver ~580+). The lanes are additive: cu130 reaches the newest
+# architectures but drops everything before Turing, which is what cu118 is for.
+#
+# Policy (see README): PyPI ships the default (cu130 on Linux/Windows, cpu on
+# macOS); this index additionally offers cpu + the other CUDA lines so users on
+# older GPUs/drivers -- or who want to match the CUDA version of their
+# PyTorch/CuPy install -- can pick a different one.
+backends = ["cpu", "cu118", "cu126", "cu130"]
 
 # PyPI-normalized project names served by the index.
 projects = [

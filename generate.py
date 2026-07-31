@@ -3,7 +3,7 @@
 
 The index is a set of static HTML pages laid out as a *simple repository*
 (:pep:`503`), one **backend** subfolder per compute target
-(``cpu/``, ``cu118/``, ``cu126/``, ``cu128/`` ...). It is published to GitHub
+(``cpu/``, ``cu118/``, ``cu126/``, ``cu130/`` ...). It is published to GitHub
 Pages at ``https://fastfields.github.io/whl/`` so users can install a build
 matching their hardware::
 
@@ -27,7 +27,7 @@ warns otherwise, since the GitHub Releases API exposes no per-asset digest.
 
 Wheel-to-backend mapping follows PyTorch's convention: the compute backend is
 encoded in the wheel's **local version label**, e.g.
-``fastfields_dlpack-0.1.0+cu128-cp311-cp311-linux_x86_64.whl``. A wheel with no
+``fastfields_dlpack-0.1.0+cu130-cp311-cp311-linux_x86_64.whl``. A wheel with no
 local label is *universal* (pure Python, e.g. the numpy/torch wrappers) and is
 listed in every backend folder so each folder resolves on its own.
 
@@ -91,7 +91,7 @@ class Wheel:
     url : str
         Absolute download URL (a GitHub Release asset URL).
     backend : str
-        Compute backend bucket (``cpu``, ``cu128``, ...), taken from the
+        Compute backend bucket (``cpu``, ``cu130``, ...), taken from the
         **leading component** of the wheel's local version label. A release
         built from an unclean tree carries a distance suffix in that same
         label (``+cpu.4.gdeadbee``); bucketing on the whole label would file
