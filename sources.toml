@@ -25,7 +25,7 @@ projects = [
 
 # GitHub repos whose Releases hold the wheel assets (used by --from-releases).
 [[sources.release]]
-repo = "fastfields/fastfields-bind-py"
+repo = "fastfields/fastfields-dlpack"
 [[sources.release]]
 repo = "fastfields/fastfields-numpy"
 [[sources.release]]
