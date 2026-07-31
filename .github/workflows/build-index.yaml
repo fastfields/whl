@@ -8,14 +8,17 @@ on:
       - generate.py
       - sources.toml
       - .github/workflows/build-index.yaml
-  # Rebuild on demand, and when a package repo publishes a release and pings us
-  # (repository_dispatch event type "wheels-updated").
-  workflow_dispatch:
+  # The index is push-triggered, not polled: each package repo's release
+  # workflow fires a `repository_dispatch` here once it has uploaded its wheels
+  # onto its own GitHub Release. See the reusable workflow in fastfields/.github
+  # ("Ping the wheel index to rebuild"), which needs a WHL_DISPATCH_TOKEN with
+  # `contents: write` on this repo -- the default GITHUB_TOKEN is scoped to the
+  # calling repo and cannot fire a workflow here.
   repository_dispatch:
     types: [wheels-updated]
-  # Safety net: pick up newly-published release assets once a day.
-  schedule:
-    - cron: "17 4 * * *"
+  # Manual rebuild, e.g. after fixing sources.toml or when a package repo could
+  # not dispatch (missing token).
+  workflow_dispatch:
 
 permissions:
   contents: read
