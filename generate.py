@@ -92,7 +92,10 @@ class Wheel:
         Absolute download URL (a GitHub Release asset URL).
     backend : str
         Compute backend bucket (``cpu``, ``cu128``, ...), taken from the
-        wheel's local version label.
+        **leading component** of the wheel's local version label. A release
+        built from an unclean tree carries a distance suffix in that same
+        label (``+cpu.4.gdeadbee``); bucketing on the whole label would file
+        it under a backend folder nobody ever asks for.
     universal : bool
         ``True`` for a pure-Python wheel (no local version label, e.g. the
         ``fastfields-numpy``/``-torch`` wrappers). Universal wheels are listed
@@ -130,11 +133,30 @@ def wheel_from_asset(filename: str, url: str, sha256: str | None) -> Wheel | Non
     if not m:
         return None
     local = m.group("local")
+    # Bucket on the FIRST component of the local label only. versioningit folds
+    # the backend and the git-describe distance into the one local segment PEP
+    # 440 allows, so a release cut from an unclean tree yields "cpu.4.gdeadbee".
+    # Taking the whole label would invent a "cpu.4.gdeadbee" backend: the wheel
+    # would vanish from cpu/, and because build() unions the backends it sees
+    # onto the declared ones, the phantom would even be advertised on the
+    # landing page as an available lane. The index would look healthy and
+    # resolve to nothing.
+    backend = "cpu"
+    if local is not None:
+        backend = local.split(".")[0]
+        if "." in local:
+            print(
+                f"::warning::{filename} has a compound local version label "
+                f"'+{local}'; bucketing it under '{backend}'. This wheel was "
+                "built from a tree that was not clean at its tag -- the "
+                "release workflow's version assert should have refused it.",
+                file=sys.stderr,
+            )
     return Wheel(
         project=normalize(m.group("dist")),
         filename=filename,
         url=url,
-        backend=local or "cpu",
+        backend=backend,
         universal=local is None,
         sha256=sha256,
     )
@@ -322,9 +344,21 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
 
     # Every folder we must emit: the config-declared backends, plus any seen on
     # a labelled wheel, plus "cpu" (always present as the universal home).
-    backends = sorted(
-        {"cpu"} | set(index_cfg.get("backends", [])) | {w.backend for w in labelled}
-    )
+    declared = set(index_cfg.get("backends", []))
+    backends = sorted({"cpu"} | declared | {w.backend for w in labelled})
+
+    # A wheel whose backend was never declared still gets its folder (dropping
+    # it silently would be worse), but it is almost always a mislabelled build
+    # rather than a new lane someone forgot to declare -- so say so loudly.
+    for backend in sorted({w.backend for w in labelled} - declared - {"cpu"}):
+        names = sorted(w.filename for w in labelled if w.backend == backend)
+        print(
+            f"::warning::backend '{backend}' is not declared in sources.toml "
+            f"but was found on {len(names)} wheel(s): {', '.join(names)}. "
+            "Either add it to [index].backends or fix the wheel's local "
+            "version label.",
+            file=sys.stderr,
+        )
 
     # backend -> project -> [wheels]. A universal (pure-Python) wheel goes into
     # EVERY backend folder so each folder resolves on its own; a labelled wheel
