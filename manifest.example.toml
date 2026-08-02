@@ -2,7 +2,7 @@
 #   python generate.py --manifest manifest.example.toml --out public
 # In CI the wheels are discovered from GitHub Releases instead
 # (python generate.py --from-releases). The backend bucket is read from each
-# wheel's local version label (the "+cu128" / "+cpu" part of the filename).
+# wheel's local version label (the "+cu130" / "+cpu" part of the filename).
 #
 # A `sha256` is REQUIRED on every [[wheel]] entry: this manifest is a file we
 # control, so generate.py rejects any entry without a digest.
@@ -13,8 +13,8 @@ url = "https://github.com/fastfields/fastfields-torch/releases/download/v0.1.0/f
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
 [[wheel]]
-filename = "fastfields_torch-0.1.0+cu128-cp311-cp311-linux_x86_64.whl"
-url = "https://github.com/fastfields/fastfields-torch/releases/download/v0.1.0/fastfields_torch-0.1.0+cu128-cp311-cp311-linux_x86_64.whl"
+filename = "fastfields_torch-0.1.0+cu130-cp311-cp311-linux_x86_64.whl"
+url = "https://github.com/fastfields/fastfields-torch/releases/download/v0.1.0/fastfields_torch-0.1.0+cu130-cp311-cp311-linux_x86_64.whl"
 sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
 
 [[wheel]]

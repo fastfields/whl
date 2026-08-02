@@ -4,15 +4,15 @@ A PyTorch-style [PEP 503][pep503] "simple repository" for the fastfields Python
 packages, published to GitHub Pages at **<https://fastfields.github.io/whl/>**.
 
 Like PyTorch's `download.pytorch.org/whl`, it has **one folder per compute
-backend** — `cpu/`, `cu118/`, `cu126/`, `cu128/`, … — so you can install a
+backend** — `cpu/`, `cu118/`, `cu126/`, `cu130/`, … — so you can install a
 build that matches your hardware. The compute backend is encoded in each
-wheel's **local version label** (e.g. `fastfields_torch-0.1.0+cu128-…whl`),
+wheel's **local version label** (e.g. `fastfields_torch-0.1.0+cu130-…whl`),
 exactly as PyTorch does.
 
 > **Status:** only the **`cpu`** lane is published today. The CUDA lanes
-> (`cu118`, `cu126`, `cu128`) are **planned but not yet published** — the
+> (`cu118`, `cu126`, `cu130`) are **planned but not yet published** — the
 > per-backend folders exist, but no CUDA wheel has been built yet, so passing
-> a `.../cu128/` folder as an `--extra-index-url` currently resolves to
+> a `.../cu130/` folder as an `--extra-index-url` currently resolves to
 > nothing. The generated landing page lists such backends under *"planned — not
 > yet published"* and only shows a `pip install` command once at least one
 > wheel is discovered for that backend.
@@ -37,21 +37,34 @@ Mirrors PyTorch's split between PyPI and the custom index:
 
 | channel | Linux / Windows | macOS |
 |---|---|---|
-| **PyPI** (`pip install fastfields-dlpack`) | the default **CUDA** wheel (`cu128`) | **CPU** wheel (no CUDA on macOS) |
-| **this index** (`--extra-index-url .../<backend>/`) | `cpu`, `cu118`, `cu126`, `cu128` | `cpu` |
+| **PyPI** (`pip install fastfields-dlpack`) | the default **CUDA** wheel (`cu130`) | **CPU** wheel (no CUDA on macOS) |
+| **this index** (`--extra-index-url .../<backend>/`) | `cpu`, `cu118`, `cu126`, `cu130` | `cpu` |
 
 Only `fastfields-dlpack` (which bundles the compiled `libfastfields*`) is built
 per-backend; the pure-Python wrappers (`fastfields-numpy`/`-torch`/`-cupy`,
 `fastfields`) are universal wheels and appear in every folder.
 
 **CUDA build target.** The wheels are compiled *fat*: one binary targets many
-GPU architectures (SASS for several `sm_*` plus a forward-compatible PTX), so a
-single wheel runs on as many GPUs as possible at the cost of size and build
-time. The PyPI default is the **newest broadly-supported** toolkit so it also
-covers the latest architectures: **`cu128`** spans Maxwell→Blackwell
-(`sm_50`…`sm_120`, driver ≥ 570). The `cu118` line on the index keeps the long
-tail alive (Kepler…Ampere on older drivers ≥ 450); `cu126` sits in between. See
-the package build workflow for the exact `-gencode` list.
+GPU architectures (SASS for several `sm_*` plus a trailing forward-compatible
+PTX entry the driver can JIT for newer GPUs), so a single wheel runs on as many
+GPUs as possible at the cost of size and build time. What a wheel can reach is
+set by the **nvcc version** it was built with — not by our source — so there is
+one lane per CUDA major:
+
+| lane | built with | reaches | min driver |
+|---|---|---|---|
+| `cu118` | nvcc 11.8 | Kepler/Maxwell → Ada (newest via PTX JIT) | ~ r450+ |
+| `cu126` | a 12.x (e.g. 12.6) | Volta → Hopper/Ada | ~ r525+ |
+| `cu130` | a 13.x (e.g. 13.0) | Turing → Blackwell (`sm_75`+) | ~ r580+ |
+
+Every lane compiles the same sources; only the nvcc version and the `-gencode`
+list differ. The lanes are **additive, not nested**: `cu130` reaches the newest
+architectures but *drops* everything before Turing — Maxwell, Pascal and Volta
+are gone from CUDA 13's offline-compile floor — which is exactly what `cu118` is
+for. The PyPI default is the newest lane, **`cu130`**, so the default wheel
+covers the latest architectures; if your GPU is pre-Turing or your driver is
+older than ~r580, take `cu118` (or `cu126`) from this index instead. See the
+package build workflow for the exact `-gencode` list.
 
 ### Mixing CUDA versions with PyTorch / CuPy
 
@@ -59,9 +72,12 @@ You can install a fastfields build compiled against a **different** CUDA version
 than your PyTorch/CuPy — they load their own CUDA runtimes side by side and
 interoperate through DLPack device pointers, which are runtime-version-agnostic.
 The only hard requirement is that your **GPU driver** satisfies the *newest*
-toolkit among them (so a `cu128` fastfields needs a driver new enough for CUDA
-12.8, even if torch is `cu126`). If you'd rather not raise your driver floor,
-pick the index folder matching your torch build (`.../cu126/`).
+toolkit among them (so a `cu130` fastfields needs a driver new enough for CUDA
+13.x, ~r580+, even if torch is `cu126` and happy on ~r525+). If you'd rather not
+raise your driver floor, pick the index folder matching your torch build
+(`.../cu126/`). Note that the driver floor is not the only constraint: a lane
+also has to *cover your GPU* — `cu130` is `sm_75`+ only, so a Pascal or Volta
+card needs `cu118` no matter how new the installed driver is.
 
 ## How it is built
 
