@@ -1,0 +1,27 @@
+name: Test the index generator
+
+# The deploy workflow only runs on `main` (and on a release dispatch), so this
+# is what gives a pull request any signal at all. Stdlib-only: no install step.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # generate.py uses tomllib (>=3.11)
+      - name: Unit tests
+        run: python -m unittest test_generate -v
+      - name: Smoke-test the offline manifest path
+        run: |
+          python generate.py --manifest manifest.example.toml --out public
+          test -f public/index.html

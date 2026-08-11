@@ -5,9 +5,13 @@ title = "fastfields wheel index"
 base_url = "https://fastfields.github.io/whl"
 org = "fastfields"
 
-# Compute-backend buckets the index advertises on its landing page, even before
-# wheels exist for them. The bucket name is the wheel's local version label
-# (PyTorch convention): "cpu", "cu118", "cu126", "cu130", ...
+# Compute-backend buckets the index knows about. The bucket name is the wheel's
+# local version label (PyTorch convention): "cpu", "cu118", "cu126", "cu130", ...
+#
+# Declaring a backend here does NOT publish it. Until a wheel bucketed into it
+# is discovered, the backend is listed on the landing page as "planned -- not
+# yet published" and serves no packages at all; only then does it become a real
+# PEP 503 folder. This list is the roadmap, not the set of installable lanes.
 #
 # One CUDA lane per CUDA major, since the nvcc version sets which GPU
 # architectures a wheel can reach: cu118 (Kepler/Maxwell -> Ada, driver ~450+),
