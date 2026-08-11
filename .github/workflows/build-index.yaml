@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - generate.py
+      - test_generate.py
       - sources.toml
       - .github/workflows/build-index.yaml
   # The index is push-triggered, not polled: each package repo's release
@@ -41,10 +42,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"   # generate.py uses tomllib (>=3.11)
+      # Gate the deploy on the generator's own tests: they pin the two
+      # invariants that make this index safe to pass to pip (a lane only serves
+      # packages once a wheel exists; every link carries a #sha256=). A broken
+      # generator must not reach Pages.
+      - name: Test the generator
+        run: python -m unittest test_generate -v
       - name: Generate PEP 503 index from GitHub Releases
         env:
           # Lets the API discovery read release assets (and raises rate limits).
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Fails (exit 1) if any discovered wheel has no establishable sha256,
+        # rather than publishing an unverifiable link.
         run: python generate.py --from-releases --out public
       - uses: actions/upload-pages-artifact@v4
         with:

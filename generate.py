@@ -12,18 +12,22 @@ matching their hardware::
 
 The wheels themselves are **not** committed here -- they are hosted as GitHub
 *Release* assets on each package repo. This script only emits the HTML that
-links to them (with a ``#sha256=`` fragment when the digest is known).
+links to them, each with a mandatory ``#sha256=`` fragment.
 
-The landing page splits the backends into those with at least one discovered
-wheel (rendered as ready-to-use ``pip install`` commands) and those that are
-merely *declared* in ``sources.toml`` but have no wheels yet (listed as
-"planned -- not yet published"), so an advertised folder never implies an
-install that silently resolves to nothing.
+A backend folder is only emitted as a real :pep:`503` repository once at least
+one wheel has been discovered for it. A backend that is merely *declared* in
+``sources.toml`` gets a plain human-readable "planned -- not yet published"
+placeholder page instead, and **no project subfolders** -- so a resolver
+pointed at that folder finds nothing at all rather than being served the
+universal wheels under a compute lane that was never built.
 
-Digests: for the ``--manifest`` path a ``sha256`` is **required** on every
-``[[wheel]]`` entry (we control that file). The ``--from-releases`` path takes
-the digest from a sibling ``<wheel>.sha256`` release asset when present and
-warns otherwise, since the GitHub Releases API exposes no per-asset digest.
+Digests are **mandatory**: every link in the index carries a ``#sha256=``
+fragment, and :func:`build` refuses to emit one without it. For the
+``--manifest`` path the digest is required on every ``[[wheel]]`` entry (we
+control that file). The ``--from-releases`` path prefers a sibling
+``<wheel>.sha256`` release asset and otherwise **downloads the wheel and
+computes the digest**; a wheel whose digest cannot be established fails the
+build rather than being published unhashed.
 
 Wheel-to-backend mapping follows PyTorch's convention: the compute backend is
 encoded in the wheel's **local version label**, e.g.
@@ -42,6 +46,7 @@ Two discovery modes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import os
@@ -59,6 +64,23 @@ WHEEL_RE = re.compile(
     r"(?:\+(?P<local>[a-zA-Z0-9.]+))?"
     r"-(?P<py>[^-]+)-(?P<abi>[^-]+)-(?P<plat>.+)\.whl$"
 )
+
+#: A sha256 digest as it must appear in a ``#sha256=`` fragment.
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+#: Read size for streaming a release asset through :mod:`hashlib`.
+_CHUNK = 1 << 20
+
+
+class MissingDigestError(Exception):
+    """Raised when a discovered wheel has no usable ``sha256`` digest.
+
+    The index is served as an ``--extra-index-url`` over GitHub Pages, which
+    makes it a supply-chain surface: an unhashed link is one nobody can verify.
+    Publishing a partial index would trade that for a *different* silent
+    failure (a wheel that quietly disappears from the index), so a digest we
+    cannot establish fails the whole build instead.
+    """
 
 
 def normalize(name: str) -> str:
@@ -100,8 +122,10 @@ class Wheel:
         ``True`` for a pure-Python wheel (no local version label, e.g. the
         ``fastfields-numpy``/``-torch`` wrappers). Universal wheels are listed
         in *every* backend folder so each folder is self-contained.
-    sha256 : str or None
-        Hex digest, when known, appended to the link as ``#sha256=``.
+    sha256 : str
+        Lower-case hex digest, appended to the link as ``#sha256=``. Required:
+        every discovery path must establish one before constructing a
+        :class:`Wheel`.
     """
 
     project: str
@@ -109,10 +133,10 @@ class Wheel:
     url: str
     backend: str
     universal: bool = False
-    sha256: str | None = None
+    sha256: str = ""
 
 
-def wheel_from_asset(filename: str, url: str, sha256: str | None) -> Wheel | None:
+def wheel_from_asset(filename: str, url: str, sha256: str) -> Wheel | None:
     """Parse a wheel file name into a :class:`Wheel`, or ``None`` if not a wheel.
 
     Parameters
@@ -121,8 +145,8 @@ def wheel_from_asset(filename: str, url: str, sha256: str | None) -> Wheel | Non
         Candidate asset file name.
     url : str
         Download URL for the asset.
-    sha256 : str or None
-        Known digest, or ``None``.
+    sha256 : str
+        The wheel's hex digest. Must already be validated by the caller.
 
     Returns
     -------
@@ -198,24 +222,50 @@ def wheels_from_manifest(path: Path) -> list[Wheel]:
 
     Raises
     ------
-    ValueError
-        If any ``[[wheel]]`` entry lacks a ``sha256`` digest.
+    MissingDigestError
+        If any ``[[wheel]]`` entry lacks a well-formed ``sha256`` digest.
     """
     with path.open("rb") as fh:
         data = tomllib.load(fh)
     out: list[Wheel] = []
     for entry in data.get("wheel", []):
-        sha256 = entry.get("sha256")
-        if not sha256:
-            name = entry.get("filename", "<unnamed>")
-            raise ValueError(
-                f"manifest wheel {name!r} is missing a required 'sha256' "
-                "digest; every [[wheel]] entry must declare one"
+        name = entry.get("filename", "<unnamed>")
+        digest = normalize_digest(entry.get("sha256"))
+        if digest is None:
+            raise MissingDigestError(
+                f"manifest wheel {name!r} has no usable 'sha256' digest "
+                f"(got {entry.get('sha256')!r}); every [[wheel]] entry must "
+                "declare one as 64 hex characters"
             )
-        wheel = wheel_from_asset(entry["filename"], entry["url"], sha256)
+        wheel = wheel_from_asset(entry["filename"], entry["url"], digest)
         if wheel is not None:
             out.append(wheel)
     return out
+
+
+def normalize_digest(value: str | None) -> str | None:
+    """Return ``value`` as a canonical sha256 hex digest, or ``None``.
+
+    A digest that is merely *present* is not enough: a truncated or otherwise
+    malformed one would be written into the ``#sha256=`` fragment verbatim and
+    fail at ``pip install`` time with a hash mismatch that looks like a
+    tampered wheel rather than a broken index.
+
+    Parameters
+    ----------
+    value : str or None
+        Candidate digest, e.g. read from a manifest or a ``.sha256`` sidecar.
+
+    Returns
+    -------
+    str or None
+        The lower-cased 64-character digest, or ``None`` if it is missing or
+        not well formed.
+    """
+    if not value:
+        return None
+    candidate = value.strip().lower()
+    return candidate if SHA256_RE.match(candidate) else None
 
 
 def _gh_get(url: str) -> list | dict:
@@ -230,33 +280,87 @@ def _gh_get(url: str) -> list | dict:
         return json.load(resp)
 
 
+def _open_asset(url: str):
+    """Open a release asset for streaming, unauthenticated first.
+
+    ``browser_download_url`` redirects to a CDN host that rejects a request
+    still carrying GitHub's ``Authorization`` header, so sending the token is
+    actively harmful for a public repo and only needed for a private one. Try
+    without it, then retry with it.
+
+    Returns
+    -------
+    http.client.HTTPResponse
+        An open response the caller must close.
+    """
+    attempts: list[str | None] = [None]
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        attempts.append(token)
+    last: Exception | None = None
+    for attempt in attempts:
+        req = urllib.request.Request(url)
+        if attempt:
+            req.add_header("Authorization", f"Bearer {attempt}")
+        try:
+            return urllib.request.urlopen(req)  # noqa: S310 (trusted host)
+        except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+            last = exc
+    raise last  # type: ignore[misc]
+
+
 def _read_sha256_asset(url: str) -> str | None:
     """Fetch a ``.sha256`` sidecar asset, returning its hex digest or ``None``.
 
     The asset content is expected to be ``<hexdigest>`` optionally followed by
     whitespace and the file name (the usual ``sha256sum`` format).
     """
-    req = urllib.request.Request(url)
-    token = os.environ.get("GITHUB_TOKEN")
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(req) as resp:  # noqa: S310 (trusted host)
+        with _open_asset(url) as resp:
             text = resp.read().decode("utf-8", "replace")
     except (urllib.error.URLError, urllib.error.HTTPError) as exc:
         print(f"::warning::failed to read {url}: {exc}", file=sys.stderr)
         return None
     parts = text.split()
-    return parts[0] if parts else None
+    return normalize_digest(parts[0] if parts else None)
+
+
+def _compute_sha256(url: str) -> str | None:
+    """Download a release asset and return its sha256, or ``None`` on failure.
+
+    This is the fallback when a package repo ships no ``.sha256`` sidecar. The
+    asset is streamed in chunks and never held in memory in full -- a fat CUDA
+    wheel is hundreds of megabytes.
+
+    Parameters
+    ----------
+    url : str
+        The asset's download URL.
+
+    Returns
+    -------
+    str or None
+        Lower-case hex digest, or ``None`` if the asset could not be read.
+    """
+    digest = hashlib.sha256()
+    try:
+        with _open_asset(url) as resp:
+            while chunk := resp.read(_CHUNK):
+                digest.update(chunk)
+    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        print(f"::warning::failed to download {url}: {exc}", file=sys.stderr)
+        return None
+    return digest.hexdigest()
 
 
 def wheels_from_releases(repos: Iterable[str]) -> list[Wheel]:
     """Discover wheels from the GitHub Releases of each source repo.
 
     The GitHub Releases API exposes no per-asset digest, so each wheel's
-    ``sha256`` is taken from a sibling ``<wheel>.sha256`` release asset if the
-    package repo ships one. A wheel with no such sidecar is still indexed but
-    triggers a ``::warning::`` (its link carries no ``#sha256=`` fragment).
+    ``sha256`` is established in two steps: a sibling ``<wheel>.sha256`` release
+    asset is used when the package repo ships one (cheap -- a few bytes), and
+    otherwise the wheel itself is downloaded and hashed. Only if *both* fail is
+    the digest unknown, and that fails the build: see :class:`MissingDigestError`.
 
     Parameters
     ----------
@@ -266,10 +370,18 @@ def wheels_from_releases(repos: Iterable[str]) -> list[Wheel]:
     Returns
     -------
     list of Wheel
-        Wheels found across all releases. Repos that error (404, rate limit)
-        are skipped with a warning rather than aborting the build.
+        Wheels found across all releases, every one carrying a digest. Repos
+        that error (404, rate limit) are skipped with a warning rather than
+        aborting the build -- an unreachable repo contributes no links, which
+        is not the same risk as an unverifiable one.
+
+    Raises
+    ------
+    MissingDigestError
+        If any discovered wheel's digest could not be established.
     """
     out: list[Wheel] = []
+    unhashed: list[str] = []
     for repo in repos:
         try:
             releases = _gh_get(
@@ -289,21 +401,41 @@ def wheels_from_releases(repos: Iterable[str]) -> list[Wheel]:
                 name = asset["name"]
                 if not name.endswith(".whl"):
                     continue
+                url = asset["browser_download_url"]
                 sha256 = None
                 sidecar_url = sidecars.get(f"{name}.sha256")
                 if sidecar_url is not None:
                     sha256 = _read_sha256_asset(sidecar_url)
-                if not sha256:
+                if sha256 is None:
+                    # No (usable) sidecar. Hash the asset ourselves rather than
+                    # publishing a link nobody can verify.
                     print(
-                        f"::warning::no sha256 for {name}; publish a matching "
-                        f"{name}.sha256 asset alongside the wheel",
+                        f"::warning::{repo}: no usable {name}.sha256 sidecar; "
+                        "downloading the wheel to compute its digest. Publish "
+                        "a .sha256 asset next to each wheel to skip this.",
                         file=sys.stderr,
                     )
-                wheel = wheel_from_asset(
-                    name, asset["browser_download_url"], sha256
-                )
+                    sha256 = _compute_sha256(url)
+                if sha256 is None:
+                    print(
+                        f"::error::{repo}: cannot establish a sha256 for "
+                        f"{name}",
+                        file=sys.stderr,
+                    )
+                    unhashed.append(f"{repo}: {name}")
+                    continue
+                wheel = wheel_from_asset(name, url, sha256)
                 if wheel is not None:
                     out.append(wheel)
+    if unhashed:
+        listed = "\n  ".join(unhashed)
+        raise MissingDigestError(
+            "no sha256 could be established for the following wheel(s), so "
+            "the index would have to link them unverified:\n  "
+            f"{listed}\n"
+            "Publish a <wheel>.sha256 asset alongside each wheel, or make the "
+            "asset downloadable so the digest can be computed."
+        )
     return out
 
 
@@ -316,11 +448,23 @@ _PAGE = """<!DOCTYPE html>
 </body></html>
 """
 
+# Placeholder for a declared-but-empty backend. Deliberately NOT carrying the
+# ``pypi:repository-version`` meta tag: this page is for a human who browsed
+# here, not a repository root, and nothing resolves underneath it.
+_PLACEHOLDER_PAGE = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="robots" content="noindex">
+<title>{title}</title></head>
+<body>
+{body}
+</body></html>
+"""
 
-def write_page(path: Path, title: str, body: str) -> None:
+
+def write_page(path: Path, title: str, body: str, template: str = _PAGE) -> None:
     """Write one HTML page, creating parent directories."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_PAGE.format(title=html.escape(title), body=body))
+    path.write_text(template.format(title=html.escape(title), body=body))
 
 
 def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
@@ -339,13 +483,35 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
     base_url = index_cfg.get("base_url", "https://fastfields.github.io/whl").rstrip("/")
     title = index_cfg.get("title", "fastfields wheel index")
 
+    unhashed = [w.filename for w in wheels if not normalize_digest(w.sha256)]
+    if unhashed:
+        # Belt and braces: this function is the single place a link is written,
+        # so the "every link carries a digest" invariant is enforced here too
+        # and cannot be bypassed by a future discovery path.
+        raise MissingDigestError(
+            "refusing to build an index with unhashed link(s): "
+            + ", ".join(sorted(unhashed))
+        )
+
     universal = [w for w in wheels if w.universal]
     labelled = [w for w in wheels if not w.universal]
 
-    # Every folder we must emit: the config-declared backends, plus any seen on
-    # a labelled wheel, plus "cpu" (always present as the universal home).
+    # Every backend we know about: the config-declared ones, plus any seen on a
+    # labelled wheel, plus "cpu" (always present as the universal home).
     declared = set(index_cfg.get("backends", []))
     backends = sorted({"cpu"} | declared | {w.backend for w in labelled})
+
+    # ...but only the ones that actually have a wheel become a PEP 503 folder.
+    # A declared-but-empty lane must not be served as a repository at all: it
+    # would still answer 200 for the universal (pure-Python) wheels mirrored
+    # into it, so `pip install fastfields-numpy --extra-index-url .../cu130/`
+    # would succeed and leave the user believing the cu130 lane exists. The
+    # compiled wheel they actually wanted would quietly come from PyPI (or not
+    # at all). Emitting nothing under a planned lane makes it resolve to
+    # nothing, consistently, for every project.
+    have_wheel = {w.backend for w in wheels}
+    available = [b for b in backends if b in have_wheel]
+    planned = [b for b in backends if b not in have_wheel]
 
     # A wheel whose backend was never declared still gets its folder (dropping
     # it silently would be worse), but it is almost always a mislabelled build
@@ -361,12 +527,12 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
         )
 
     # backend -> project -> [wheels]. A universal (pure-Python) wheel goes into
-    # EVERY backend folder so each folder resolves on its own; a labelled wheel
-    # only into its own backend.
-    tree: dict[str, dict[str, list[Wheel]]] = {b: {} for b in backends}
+    # every *available* backend folder so each folder resolves on its own; a
+    # labelled wheel only into its own backend.
+    tree: dict[str, dict[str, list[Wheel]]] = {b: {} for b in available}
     for w in labelled:
         tree.setdefault(w.backend, {}).setdefault(w.project, []).append(w)
-    for b in backends:
+    for b in available:
         for w in universal:
             tree[b].setdefault(w.project, []).append(w)
 
@@ -384,9 +550,12 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
         )
         for proj, plist in projects.items():
             files = "\n".join(
-                '<a href="{url}{frag}">{name}</a><br>'.format(
+                # The fragment is unconditional: build() has already refused
+                # any wheel without a well-formed digest, so there is no
+                # "hash unknown" branch to fall into here.
+                '<a href="{url}#sha256={sha}">{name}</a><br>'.format(
                     url=html.escape(w.url),
-                    frag=f"#sha256={w.sha256}" if w.sha256 else "",
+                    sha=w.sha256,
                     name=html.escape(w.filename),
                 )
                 for w in sorted(plist, key=lambda w: w.filename)
@@ -397,16 +566,31 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
                 files,
             )
 
+    # Planned lanes: a human-readable dead end, and nothing underneath it. The
+    # page exists so browsing to the folder explains itself instead of serving
+    # a 404; it is not a PEP 503 repository root, and no project subfolder is
+    # written, so every resolver request under this lane 404s.
+    for backend in planned:
+        write_page(
+            out_dir / backend / "index.html",
+            f"{title} :: {backend} (not yet published)",
+            f"<h1><code>{html.escape(backend)}</code> &mdash; planned, not yet "
+            "published</h1>"
+            f"<p>No <code>{html.escape(backend)}</code> wheel has been built "
+            "yet, so this folder serves no packages. Passing it as an "
+            "<code>--extra-index-url</code> resolves to nothing &mdash; your "
+            "install would silently fall back to PyPI.</p>"
+            f'<p>See the <a href="{html.escape(base_url)}/">index home</a> for '
+            "the lanes that are available today.</p>",
+            template=_PLACEHOLDER_PAGE,
+        )
+
     # Human-facing landing page. Only advertise a copy-paste ``pip install``
     # for backends that actually have a discovered wheel; backends that are
     # merely declared in sources.toml (no wheels yet) are listed as "planned"
     # so an advertised folder never implies an install that resolves to
     # nothing. A universal (pure-Python) wheel counts under "cpu" (its bucket),
     # not as coverage for every CUDA lane it is mirrored into.
-    have_wheel = {w.backend for w in wheels}
-    available = [b for b in backends if b in have_wheel]
-    planned = [b for b in backends if b not in have_wheel]
-
     avail_rows = "\n".join(
         "<li><code>{b}</code> &mdash; "
         "<code>pip install fastfields-torch --extra-index-url "
@@ -416,7 +600,10 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
         for b in available
     )
     planned_rows = "\n".join(
-        f"<li><code>{html.escape(b)}</code></li>" for b in planned
+        '<li><code><a href="{base}/{b}/">{b}</a></code></li>'.format(
+            b=html.escape(b), base=html.escape(base_url)
+        )
+        for b in planned
     )
 
     parts = [
@@ -433,9 +620,10 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
         parts.append("<h2>Planned &mdash; not yet published</h2>")
         parts.append(
             "<p>These backends are declared but have no wheels published "
-            "yet, so installing from their folder resolves to nothing "
-            "today. Do not pass them as an <code>--extra-index-url</code> "
-            "until a build lands here.</p>"
+            "yet, so <strong>no packages are served under them at all</strong> "
+            "&mdash; passing one as an <code>--extra-index-url</code> resolves "
+            "to nothing and your install silently falls back to PyPI. Do not "
+            "use them until a build lands here.</p>"
         )
         parts.append(f"<ul>{planned_rows}</ul>")
     parts.append(
@@ -446,7 +634,14 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
     write_page(out_dir / "index.html", title, body)
     print(
         f"wrote {sum(len(p) for b in tree.values() for p in b.values())} "
-        f"wheels across {len(tree)} backend(s) to {out_dir}"
+        f"wheels across {len(tree)} published backend(s) "
+        f"({', '.join(available) or 'none'}) to {out_dir}"
+        + (
+            f"; {len(planned)} planned backend(s) "
+            f"({', '.join(planned)}) serve no packages"
+            if planned
+            else ""
+        )
     )
 
 
@@ -469,15 +664,24 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_config(args.config)
     wheels: list[Wheel] = []
-    if args.manifest:
-        wheels += wheels_from_manifest(args.manifest)
-    if args.from_releases:
-        repos = [s["repo"] for s in config.get("sources", {}).get("release", [])]
-        wheels += wheels_from_releases(repos)
     if not args.manifest and not args.from_releases:
         ap.error("pass --manifest and/or --from-releases")
 
-    build(wheels, args.out, config)
+    # A missing digest is a normal, actionable operational failure (someone
+    # published a wheel without its sidecar), so report it as an error the
+    # workflow log can be read for -- not as a traceback.
+    try:
+        if args.manifest:
+            wheels += wheels_from_manifest(args.manifest)
+        if args.from_releases:
+            repos = [
+                s["repo"] for s in config.get("sources", {}).get("release", [])
+            ]
+            wheels += wheels_from_releases(repos)
+        build(wheels, args.out, config)
+    except MissingDigestError as exc:
+        print(f"::error::{exc}", file=sys.stderr)
+        return 1
     return 0
 
 
