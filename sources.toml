@@ -31,6 +31,7 @@ projects = [
     "fastfields-numpy",
     "fastfields-cupy",
     "fastfields-torch",
+    "fastfields-helpers",
     "fastfields",
 ]
 
@@ -43,5 +44,7 @@ repo = "fastfields/fastfields-numpy"
 repo = "fastfields/fastfields-cupy"
 [[sources.release]]
 repo = "fastfields/fastfields-torch"
+[[sources.release]]
+repo = "fastfields/fastfields-helpers"
 [[sources.release]]
 repo = "fastfields/fastfields"
