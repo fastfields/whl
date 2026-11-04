@@ -18,7 +18,7 @@ exactly as PyTorch does.
 > published" placeholder at `.../cu130/` and **no package folders underneath
 > it**, so a resolver pointed there finds nothing for *any* project. That
 > matters because the pure-Python wrapper wheels are otherwise mirrored into
-> every backend folder: if the lane were served, `pip install fastfields-numpy
+> every backend folder: if the lane were served, `pip install fastfields
 > --extra-index-url .../cu130/` would *succeed* and imply a CUDA lane that was
 > never built, while the compiled wheel quietly came from PyPI. The lane turns
 > itself on automatically as soon as a `+cu130` wheel is published — nothing
@@ -32,7 +32,7 @@ The index only serves the `fastfields-*` packages; ordinary dependencies
 
 ```sh
 # CPU-only build (the only lane that will ever be published today)
-pip install fastfields-numpy --extra-index-url https://fastfields.github.io/whl/cpu/
+pip install fastfields --extra-index-url https://fastfields.github.io/whl/cpu/
 ```
 
 The CUDA lanes above are not installable from this index yet; see the status
@@ -56,9 +56,11 @@ This table is the **target** layout. See the status note above for what is
 actually served today: the CUDA lanes are declared but publish nothing, and are
 not served as installable folders until a wheel for them exists.
 
-Only `fastfields-dlpack` (which bundles the compiled `libfastfields*`) is built
-per-backend; the pure-Python wrappers (`fastfields-numpy`/`-torch`/`-cupy`,
-`fastfields`) are universal wheels and appear in every folder.
+There are **two** Python distributions. Only `fastfields-dlpack` (which
+bundles the compiled `libfastfields*`) is built per-backend; `fastfields` --
+which ships `fastfields.{helpers,numpy,cupy,torch,auto}` as one pure-Python
+distribution since fastfields#3 merged the four wrapper distributions into it
+-- is a universal wheel and appears in every folder.
 
 **CUDA build target.** The wheels are compiled *fat*: one binary targets many
 GPU architectures (SASS for several `sm_*` plus a trailing forward-compatible
@@ -101,7 +103,7 @@ card needs `cu118` no matter how new the installed driver is.
   `public/`. It buckets wheels by their local version label and links to the
   wheel files (hosted as **GitHub Release assets** on each package repo, not
   committed here).
-- `sources.toml` — the declared backends, the served projects, and the source
+- `sources.toml` — the declared backends, the two served projects, and the source
   repos whose Releases hold the wheels.
 - `test_generate.py` — `unittest` suite for the generator (`python -m unittest
   test_generate`). It pins the two invariants below.

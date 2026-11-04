@@ -7,7 +7,7 @@ The index is a set of static HTML pages laid out as a *simple repository*
 Pages at ``https://fastfields.github.io/whl/`` so users can install a build
 matching their hardware::
 
-    pip install fastfields-torch \\
+    pip install fastfields \\
         --extra-index-url https://fastfields.github.io/whl/cpu/
 
 The wheels themselves are **not** committed here -- they are hosted as GitHub
@@ -95,7 +95,7 @@ def normalize(name: str) -> str:
     -------
     str
         Lower-cased, with any run of ``-``, ``_`` or ``.`` collapsed to a
-        single ``-`` (e.g. ``fastfields-torch``).
+        single ``-`` (e.g. ``fastfields-dlpack``).
     """
     return re.sub(r"[-_.]+", "-", name).lower()
 
@@ -120,7 +120,7 @@ class Wheel:
         it under a backend folder nobody ever asks for.
     universal : bool
         ``True`` for a pure-Python wheel (no local version label, e.g. the
-        ``fastfields-numpy``/``-torch`` wrappers). Universal wheels are listed
+        ``fastfields`` wrappers distribution). Universal wheels are listed
         in *every* backend folder so each folder is self-contained.
     sha256 : str
         Lower-case hex digest, appended to the link as ``#sha256=``. Required:
@@ -504,7 +504,7 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
     # ...but only the ones that actually have a wheel become a PEP 503 folder.
     # A declared-but-empty lane must not be served as a repository at all: it
     # would still answer 200 for the universal (pure-Python) wheels mirrored
-    # into it, so `pip install fastfields-numpy --extra-index-url .../cu130/`
+    # into it, so `pip install fastfields --extra-index-url .../cu130/`
     # would succeed and leave the user believing the cu130 lane exists. The
     # compiled wheel they actually wanted would quietly come from PyPI (or not
     # at all). Emitting nothing under a planned lane makes it resolve to
@@ -593,7 +593,7 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
     # not as coverage for every CUDA lane it is mirrored into.
     avail_rows = "\n".join(
         "<li><code>{b}</code> &mdash; "
-        "<code>pip install fastfields-torch --extra-index-url "
+        "<code>pip install fastfields --extra-index-url "
         "{base}/{b}/</code></li>".format(
             b=html.escape(b), base=html.escape(base_url)
         )

@@ -26,25 +26,26 @@ org = "fastfields"
 backends = ["cpu", "cu118", "cu126", "cu130"]
 
 # PyPI-normalized project names served by the index.
+#
+# There are two Python distributions, not six. fastfields-numpy,
+# fastfields-cupy, fastfields-torch and fastfields-helpers were merged into
+# the `fastfields` distribution (fastfields#3), which now ships
+# fastfields.{helpers,numpy,cupy,torch,auto} as one universal wheel; only the
+# compiled bindings stayed separate, because they are the only thing here that
+# needs a per-platform wheel matrix.
+#
+# The four absorbed names are deliberately NOT kept as aliases. Nothing was
+# ever published under them -- no repo has cut a release, so the index has
+# never served a wheel for any project -- so there is no installed user to
+# keep working and nothing to redirect. Leaving them listed would have the
+# generator advertise four projects that can never acquire a wheel.
 projects = [
     "fastfields-dlpack",
-    "fastfields-numpy",
-    "fastfields-cupy",
-    "fastfields-torch",
-    "fastfields-helpers",
     "fastfields",
 ]
 
 # GitHub repos whose Releases hold the wheel assets (used by --from-releases).
 [[sources.release]]
 repo = "fastfields/fastfields-dlpack"
-[[sources.release]]
-repo = "fastfields/fastfields-numpy"
-[[sources.release]]
-repo = "fastfields/fastfields-cupy"
-[[sources.release]]
-repo = "fastfields/fastfields-torch"
-[[sources.release]]
-repo = "fastfields/fastfields-helpers"
 [[sources.release]]
 repo = "fastfields/fastfields"

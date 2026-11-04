@@ -42,10 +42,10 @@ def cpu_wheel() -> generate.Wheel:
 
 
 def universal_wheel() -> generate.Wheel:
-    """A pure-Python wrapper wheel (no local label)."""
+    """The pure-Python wrappers distribution (no local label)."""
     return generate.wheel_from_asset(
-        "fastfields_numpy-0.1.0-py3-none-any.whl",
-        "https://example.test/numpy.whl",
+        "fastfields-0.1.0-py3-none-any.whl",
+        "https://example.test/fastfields.whl",
         DIGEST_B,
     )
 
@@ -133,9 +133,9 @@ class TestDigestsAreMandatoryInOutput(BuildCase):
         # The invariant is enforced at the single place links are written, so
         # no future discovery path can smuggle an unverifiable link in.
         unhashed = generate.Wheel(
-            project="fastfields-numpy",
-            filename="fastfields_numpy-0.1.0-py3-none-any.whl",
-            url="https://example.test/numpy.whl",
+            project="fastfields",
+            filename="fastfields-0.1.0-py3-none-any.whl",
+            url="https://example.test/fastfields.whl",
             backend="cpu",
             universal=True,
             sha256="",
@@ -159,7 +159,7 @@ class TestPlannedBackendsServeNothing(BuildCase):
 
     Before this, every declared CUDA folder was emitted as a valid PEP 503
     repository *and* had the universal wheels mirrored into it -- so
-    ``pip install fastfields-numpy --extra-index-url .../cu130/`` succeeded and
+    ``pip install fastfields --extra-index-url .../cu130/`` succeeded and
     implied a cu130 lane that had never been built.
     """
 
@@ -172,7 +172,7 @@ class TestPlannedBackendsServeNothing(BuildCase):
 
     def test_universal_wheels_are_not_mirrored_into_a_planned_lane(self):
         out = self.build([cpu_wheel(), universal_wheel()])
-        self.assertFalse((out / "cu130" / "fastfields-numpy").exists())
+        self.assertFalse((out / "cu130" / "fastfields").exists())
 
     def test_planned_lane_page_is_not_a_pep503_repository_root(self):
         out = self.build([cpu_wheel(), universal_wheel()])
@@ -183,25 +183,25 @@ class TestPlannedBackendsServeNothing(BuildCase):
     def test_available_lane_serves_both_its_own_and_universal_wheels(self):
         out = self.build([cpu_wheel(), universal_wheel()])
         self.assertTrue((out / "cpu" / "fastfields-dlpack" / "index.html").exists())
-        self.assertTrue((out / "cpu" / "fastfields-numpy" / "index.html").exists())
+        self.assertTrue((out / "cpu" / "fastfields" / "index.html").exists())
 
     def test_a_lane_becomes_available_as_soon_as_a_wheel_exists(self):
         # The deferral is data-driven, not a hardcoded CUDA block: publishing a
         # cu130 wheel is all it takes to turn the lane on.
         out = self.build([cpu_wheel(), universal_wheel(), cuda_wheel()])
         self.assertTrue((out / "cu130" / "fastfields-dlpack" / "index.html").exists())
-        self.assertTrue((out / "cu130" / "fastfields-numpy" / "index.html").exists())
+        self.assertTrue((out / "cu130" / "fastfields" / "index.html").exists())
         page = (out / "cu130" / "index.html").read_text()
         self.assertIn("pypi:repository-version", page)
         # ...and the lanes still unbuilt stay closed.
-        self.assertFalse((out / "cu118" / "fastfields-numpy").exists())
+        self.assertFalse((out / "cu118" / "fastfields").exists())
 
     def test_landing_page_only_advertises_installable_lanes(self):
         out = self.build([cpu_wheel(), universal_wheel()])
         page = (out / "index.html").read_text()
         self.assertIn("Planned &mdash; not yet published", page)
         self.assertIn(
-            "pip install fastfields-torch --extra-index-url "
+            "pip install fastfields --extra-index-url "
             "https://fastfields.github.io/whl/cpu/",
             page,
         )
