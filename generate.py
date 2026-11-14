@@ -135,6 +135,61 @@ class Wheel:
     universal: bool = False
     sha256: str = ""
 
+    @property
+    def platform_tags(self) -> tuple[str, ...]:
+        """The wheel's :pep:`425` platform tags, e.g. ``("win_amd64",)``.
+
+        A compressed tag set (``manylinux_2_17_x86_64.manylinux2014_x86_64``,
+        as auditwheel writes it) is one wheel valid for each member, so it is
+        split on ``.``.
+        """
+        m = WHEEL_RE.match(self.filename)
+        return tuple(m.group("plat").split(".")) if m else ()
+
+    @property
+    def platforms(self) -> tuple[str, ...]:
+        """Human-readable platforms this wheel installs on (sorted, unique)."""
+        return tuple(
+            sorted({platform_label(t) for t in self.platform_tags}, key=str.lower)
+        )
+
+
+#: Platform-tag patterns, most specific first, and how the landing page names
+#: them. Windows and macOS tags are spelled by the interpreter (``win_amd64``,
+#: ``macosx_<major>_<minor>_<arch>``); Linux ones by auditwheel.
+_PLATFORM_PATTERNS = (
+    (re.compile(r"^any$"), "any"),
+    (re.compile(r"^win_amd64$"), "Windows x64"),
+    (re.compile(r"^win_arm64$"), "Windows arm64"),
+    (re.compile(r"^win32$"), "Windows x86"),
+    (re.compile(r"^macosx_\d+_\d+_arm64$"), "macOS arm64"),
+    (re.compile(r"^macosx_\d+_\d+_x86_64$"), "macOS x86_64"),
+    (re.compile(r"^macosx_\d+_\d+_universal2$"), "macOS universal2"),
+    (re.compile(r"^(?:manylinux_\d+_\d+|manylinux\d+)_x86_64$"), "Linux x86_64"),
+    (re.compile(r"^(?:manylinux_\d+_\d+|manylinux\d+)_aarch64$"), "Linux aarch64"),
+    (re.compile(r"^musllinux_\d+_\d+_x86_64$"), "Linux x86_64 (musl)"),
+)
+
+
+def platform_label(tag: str) -> str:
+    """Name a :pep:`425` platform tag for humans; unknown tags pass through.
+
+    Parameters
+    ----------
+    tag : str
+        One platform tag, e.g. ``macosx_11_0_arm64``.
+
+    Returns
+    -------
+    str
+        ``"macOS arm64"``, ``"Windows x64"``, ``"Linux x86_64"``, ... or the
+        tag itself if it matches none of the known spellings.
+    """
+    for pattern, label in _PLATFORM_PATTERNS:
+        if pattern.match(tag):
+            return label
+    return tag
+
 
 def wheel_from_asset(filename: str, url: str, sha256: str) -> Wheel | None:
     """Parse a wheel file name into a :class:`Wheel`, or ``None`` if not a wheel.
@@ -174,6 +229,19 @@ def wheel_from_asset(filename: str, url: str, sha256: str) -> Wheel | None:
                 f"'+{local}'; bucketing it under '{backend}'. This wheel was "
                 "built from a tree that was not clean at its tag -- the "
                 "release workflow's version assert should have refused it.",
+                file=sys.stderr,
+            )
+    for tag in m.group("plat").split("."):
+        # An unrepaired Linux wheel (auditwheel never ran) is tagged
+        # `linux_x86_64`, which pip accepts on any glibc whatever symbol
+        # versions the binary needs -- the manylinux promise is exactly what
+        # it lacks. Still indexed, as a missing digest is not the issue here,
+        # but loudly.
+        if tag.startswith("linux_"):
+            print(
+                f"::warning::{filename} carries the bare platform tag "
+                f"'{tag}', not a manylinux one: it was not repaired by "
+                "auditwheel and may not load on an older glibc.",
                 file=sys.stderr,
             )
     return Wheel(
@@ -591,11 +659,40 @@ def build(wheels: list[Wheel], out_dir: Path, config: dict) -> None:
     # so an advertised folder never implies an install that resolves to
     # nothing. A universal (pure-Python) wheel counts under "cpu" (its bucket),
     # not as coverage for every CUDA lane it is mirrored into.
+    # Each available lane also says which platforms its compiled wheels cover
+    # (macOS arm64 / x86_64, Windows x64, Linux x86_64, ...), so "is there a
+    # wheel for my machine?" is answered here rather than by a failed install
+    # falling back to an sdist build.
+    def lane_platforms(backend: str) -> str:
+        per_project = []
+        for proj in sorted(tree.get(backend, {})):
+            plats = sorted(
+                {
+                    p
+                    for w in tree[backend][proj]
+                    if not w.universal
+                    for p in w.platforms
+                },
+                key=str.lower,
+            )
+            if plats:
+                per_project.append(
+                    "<code>{p}</code>: {plats}".format(
+                        p=html.escape(proj),
+                        plats=", ".join(html.escape(x) for x in plats),
+                    )
+                )
+        if not per_project:
+            return ""
+        return " <br><small>" + "; ".join(per_project) + "</small>"
+
     avail_rows = "\n".join(
         "<li><code>{b}</code> &mdash; "
         "<code>pip install fastfields --extra-index-url "
-        "{base}/{b}/</code></li>".format(
-            b=html.escape(b), base=html.escape(base_url)
+        "{base}/{b}/</code>{plats}</li>".format(
+            b=html.escape(b),
+            base=html.escape(base_url),
+            plats=lane_platforms(b),
         )
         for b in available
     )

@@ -56,6 +56,14 @@ This table is the **target** layout. See the status note above for what is
 actually served today: the CUDA lanes are declared but publish nothing, and are
 not served as installable folders until a wheel for them exists.
 
+**Platforms.** `fastfields-dlpack` is one abi3 wheel (`cp310-abi3`, every
+CPython >= 3.10) per platform: `manylinux_2_28_x86_64`, `macosx_11_0_arm64`,
+`macosx_11_0_x86_64` (separate per-architecture wheels, not `universal2`) and
+`win_amd64`. They share one lane folder per backend -- pip picks the file whose
+platform tag matches the machine -- and the landing page lists, per lane, which
+platforms its compiled wheels actually cover, so a missing one is visible there
+rather than as a fall-back to a source build. CUDA lanes are Linux/Windows only.
+
 There are **two** Python distributions. Only `fastfields-dlpack` (which
 bundles the compiled `libfastfields*`) is built per-backend; `fastfields` --
 which ships `fastfields.{helpers,numpy,cupy,torch,auto}` as one pure-Python

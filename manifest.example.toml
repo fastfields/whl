@@ -6,18 +6,38 @@
 #
 # A `sha256` is REQUIRED on every [[wheel]] entry: this manifest is a file we
 # control, so generate.py rejects any entry without a digest.
+#
+# The entries mirror what a release publishes: one abi3 fastfields-dlpack
+# wheel per platform -- Linux x86_64, macOS arm64, macOS x86_64 (separate
+# per-arch wheels, not universal2), Windows x64 -- plus the single universal
+# `fastfields` wheel, which is listed in every published lane.
 
 [[wheel]]
-filename = "fastfields_torch-0.1.0+cpu-cp311-cp311-linux_x86_64.whl"
-url = "https://github.com/fastfields/fastfields-torch/releases/download/v0.1.0/fastfields_torch-0.1.0+cpu-cp311-cp311-linux_x86_64.whl"
+filename = "fastfields_dlpack-0.1.0+cpu-cp310-abi3-manylinux_2_28_x86_64.whl"
+url = "https://github.com/fastfields/fastfields-dlpack/releases/download/0.1.0/fastfields_dlpack-0.1.0+cpu-cp310-abi3-manylinux_2_28_x86_64.whl"
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
 [[wheel]]
-filename = "fastfields_torch-0.1.0+cu130-cp311-cp311-linux_x86_64.whl"
-url = "https://github.com/fastfields/fastfields-torch/releases/download/v0.1.0/fastfields_torch-0.1.0+cu130-cp311-cp311-linux_x86_64.whl"
+filename = "fastfields_dlpack-0.1.0+cpu-cp310-abi3-macosx_11_0_arm64.whl"
+url = "https://github.com/fastfields/fastfields-dlpack/releases/download/0.1.0/fastfields_dlpack-0.1.0+cpu-cp310-abi3-macosx_11_0_arm64.whl"
 sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
 
 [[wheel]]
-filename = "fastfields_numpy-0.1.0-py3-none-any.whl"
-url = "https://github.com/fastfields/fastfields-numpy/releases/download/v0.1.0/fastfields_numpy-0.1.0-py3-none-any.whl"
+filename = "fastfields_dlpack-0.1.0+cpu-cp310-abi3-macosx_11_0_x86_64.whl"
+url = "https://github.com/fastfields/fastfields-dlpack/releases/download/0.1.0/fastfields_dlpack-0.1.0+cpu-cp310-abi3-macosx_11_0_x86_64.whl"
 sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+
+[[wheel]]
+filename = "fastfields_dlpack-0.1.0+cpu-cp310-abi3-win_amd64.whl"
+url = "https://github.com/fastfields/fastfields-dlpack/releases/download/0.1.0/fastfields_dlpack-0.1.0+cpu-cp310-abi3-win_amd64.whl"
+sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+
+[[wheel]]
+filename = "fastfields_dlpack-0.1.0+cu130-cp310-abi3-manylinux_2_28_x86_64.whl"
+url = "https://github.com/fastfields/fastfields-dlpack/releases/download/0.1.0/fastfields_dlpack-0.1.0+cu130-cp310-abi3-manylinux_2_28_x86_64.whl"
+sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+
+[[wheel]]
+filename = "fastfields-0.1.0-py3-none-any.whl"
+url = "https://github.com/fastfields/fastfields/releases/download/0.1.0/fastfields-0.1.0-py3-none-any.whl"
+sha256 = "5555555555555555555555555555555555555555555555555555555555555555"
