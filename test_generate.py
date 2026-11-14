@@ -35,7 +35,7 @@ CONFIG = {
 def cpu_wheel() -> generate.Wheel:
     """A compiled CPU wheel (local label ``+cpu``)."""
     return generate.wheel_from_asset(
-        "fastfields_dlpack-0.1.0+cpu-cp311-cp311-linux_x86_64.whl",
+        "fastfields_dlpack-0.1.0+cpu-cp311-cp311-manylinux_2_28_x86_64.whl",
         "https://example.test/dlpack-cpu.whl",
         DIGEST_A,
     )
@@ -53,7 +53,7 @@ def universal_wheel() -> generate.Wheel:
 def cuda_wheel() -> generate.Wheel:
     """A compiled CUDA wheel (local label ``+cu130``)."""
     return generate.wheel_from_asset(
-        "fastfields_dlpack-0.1.0+cu130-cp311-cp311-linux_x86_64.whl",
+        "fastfields_dlpack-0.1.0+cu130-cp311-cp311-manylinux_2_28_x86_64.whl",
         "https://example.test/dlpack-cu130.whl",
         DIGEST_C,
     )
@@ -85,7 +85,7 @@ class TestWheelParsing(unittest.TestCase):
         # local segment; bucketing on the whole label would invent a phantom
         # "cpu.4.gdeadbee" backend and the wheel would vanish from cpu/.
         wheel = generate.wheel_from_asset(
-            "fastfields_dlpack-0.1.0+cpu.4.gdeadbee-cp311-cp311-linux_x86_64.whl",
+            "fastfields_dlpack-0.1.0+cpu.4.gdeadbee-cp311-cp311-manylinux_2_28_x86_64.whl",
             "https://example.test/dirty.whl",
             DIGEST_A,
         )
@@ -220,6 +220,116 @@ class TestPlannedBackendsServeNothing(BuildCase):
                 self.assertEqual(
                     [p for p in (out / lane).iterdir() if p.is_dir()], []
                 )
+
+
+# The four compiled wheels a fastfields-dlpack release produces, named exactly
+# as cibuildwheel + the repair step write them: one abi3 wheel per platform
+# (and, on macOS, per architecture -- there is no universal2 wheel).
+RELEASE_WHEELS = {
+    "Linux x86_64":
+        "fastfields_dlpack-0.0.dev1+cpu-cp310-abi3-manylinux_2_28_x86_64.whl",
+    "macOS arm64":
+        "fastfields_dlpack-0.0.dev1+cpu-cp310-abi3-macosx_11_0_arm64.whl",
+    "macOS x86_64":
+        "fastfields_dlpack-0.0.dev1+cpu-cp310-abi3-macosx_11_0_x86_64.whl",
+    "Windows x64":
+        "fastfields_dlpack-0.0.dev1+cpu-cp310-abi3-win_amd64.whl",
+}
+
+
+def release_wheels() -> list[generate.Wheel]:
+    return [
+        generate.wheel_from_asset(
+            name, f"https://example.test/{name}", f"{i:x}" * 64
+        )
+        for i, name in enumerate(RELEASE_WHEELS.values(), start=1)
+    ]
+
+
+class TestPlatformTags(unittest.TestCase):
+    def test_every_release_platform_parses_into_the_cpu_lane(self):
+        for label, name in RELEASE_WHEELS.items():
+            with self.subTest(platform=label):
+                wheel = generate.wheel_from_asset(
+                    name, "https://example.test/w.whl", DIGEST_A
+                )
+                self.assertIsNotNone(wheel)
+                self.assertEqual(wheel.project, "fastfields-dlpack")
+                self.assertEqual(wheel.backend, "cpu")
+                self.assertFalse(wheel.universal)
+                self.assertEqual(wheel.platforms, (label,))
+
+    def test_platform_tag_is_kept_verbatim(self):
+        # pip matches the tag in the *file name* against the interpreter's
+        # supported tags, so the tag must survive parsing untouched: an arm64
+        # wheel listed as x86_64 (or vice versa) is the mislabelled-wheel
+        # failure the release workflow guards against on the build side.
+        for name in RELEASE_WHEELS.values():
+            wheel = generate.wheel_from_asset(name, "https://x.test/w", DIGEST_A)
+            with self.subTest(name=name):
+                self.assertTrue(name.endswith(wheel.platform_tags[0] + ".whl"))
+
+    def test_macos_architectures_are_told_apart(self):
+        arm = generate.platform_label("macosx_11_0_arm64")
+        intel = generate.platform_label("macosx_11_0_x86_64")
+        self.assertEqual((arm, intel), ("macOS arm64", "macOS x86_64"))
+        self.assertEqual(
+            generate.platform_label("macosx_10_13_universal2"),
+            "macOS universal2",
+        )
+
+    def test_compressed_tag_set_is_split(self):
+        wheel = generate.wheel_from_asset(
+            "fastfields_dlpack-0.1.0+cpu-cp310-abi3-"
+            "manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+            "https://x.test/w",
+            DIGEST_A,
+        )
+        self.assertEqual(
+            wheel.platform_tags,
+            ("manylinux_2_17_x86_64", "manylinux2014_x86_64"),
+        )
+        self.assertEqual(wheel.platforms, ("Linux x86_64",))
+
+    def test_universal_wheel_is_any(self):
+        self.assertEqual(universal_wheel().platforms, ("any",))
+
+    def test_unknown_tag_passes_through(self):
+        self.assertEqual(generate.platform_label("plan9_mips"), "plan9_mips")
+
+
+class TestMultiPlatformIndex(BuildCase):
+    def test_every_platform_is_linked_from_the_cpu_lane(self):
+        out = self.build(release_wheels() + [universal_wheel()])
+        page = (out / "cpu" / "fastfields-dlpack" / "index.html").read_text()
+        for i, name in enumerate(RELEASE_WHEELS.values(), start=1):
+            with self.subTest(wheel=name):
+                self.assertIn(
+                    f'<a href="https://example.test/{name}'
+                    f'#sha256={f"{i:x}" * 64}">{name}</a>',
+                    page,
+                )
+        # A compiled wheel belongs to its own lane only.
+        for lane in ("cu118", "cu126", "cu130"):
+            self.assertFalse((out / lane / "fastfields-dlpack").exists())
+
+    def test_landing_page_lists_the_platforms_each_lane_covers(self):
+        out = self.build(release_wheels() + [universal_wheel()])
+        page = (out / "index.html").read_text()
+        self.assertIn(
+            "<code>fastfields-dlpack</code>: Linux x86_64, macOS arm64, "
+            "macOS x86_64, Windows x64",
+            page,
+        )
+        # The pure-Python distribution is not a platform claim.
+        self.assertNotIn("<code>fastfields</code>: any", page)
+
+    def test_a_missing_platform_is_visible_on_the_landing_page(self):
+        linux_only = [w for w in release_wheels() if "manylinux" in w.filename]
+        out = self.build(linux_only)
+        page = (out / "index.html").read_text()
+        self.assertIn("<code>fastfields-dlpack</code>: Linux x86_64<", page)
+        self.assertNotIn("Windows x64", page)
 
 
 if __name__ == "__main__":
